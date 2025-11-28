@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Echo Maneuver</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background-color: #050505;
+            color: #0ff;
+            font-family: 'Orbitron', sans-serif;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        /* Fit nicely in a mobile iframe, one-screen view */
+        #game-container {
+            position: relative;
+            border: 2px solid #0ff;
+            box-shadow: 0 0 20px #0ff;
+            width: min(100vw - 20px, 1000px);
+            aspect-ratio: 25 / 9; /* matches 1000x360 */
+            background: #111;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* UI Overlays */
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        h1 {
+            font-size: 32px;
+            text-shadow: 0 0 10px #0ff;
+            margin-bottom: 20px;
+            letter-spacing: 4px;
+            text-align: center;
+        }
+
+        button {
+            background: transparent;
+            border: 2px solid #0ff;
+            color: #0ff;
+            padding: 12px 24px;
+            font-size: 14px;
+            font-family: 'Orbitron', sans-serif;
+            margin: 8px;
+            cursor: pointer;
+            transition: 0.2s;
+            text-transform: uppercase;
+            min-width: 160px;
+        }
+
+        button:hover {
+            background: #0ff;
+            color: #000;
+            box-shadow: 0 0 15px #0ff;
+        }
+
+        /* Level Grid */
+        #level-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 8px;
+            max-width: 260px;
+        }
+
+        .level-btn {
+            min-width: 0;
+            padding: 8px;
+        }
+
+        /* Story Modal */
+        #story-screen {
+            background: rgba(0, 20, 20, 0.95);
+            border-top: 4px solid #f00;
+            border-bottom: 4px solid #f00;
+        }
+
+        #story-text {
+            font-size: 18px;
+            color: #f55;
+            text-align: center;
+            max-width: 80%;
+            line-height: 1.4;
+            margin-bottom: 24px;
+            text-shadow: 0 0 5px #f00;
+        }
+
+        #hud {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .red-text {
+            color: #f00;
+            text-shadow: 0 0 10px #f00;
+        }
+
+        /* Exit button (in-game menu) */
+        #btn-exit {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            min-width: unset;
+            z-index: 6;
+        }
+
+        #btn-exit.hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+<div id="game-container">
+    <canvas id="gameCanvas" width="1000" height="360"></canvas>
+
+    <div id="hud">УРОВЕНЬ: <span id="hud-level">1</span></div>
+    <button id="btn-exit" class="hidden">МЕНЮ</button>
+
+    <!-- Main Menu -->
+    <div id="menu-screen" class="screen">
+        <h1>ECHO MANEUVER</h1>
+        <button id="btn-new-game">НОВАЯ ИГРА</button>
+        <button id="btn-level-select">ВЫБОР УРОВНЯ</button>
+    </div>
+
+    <!-- Level Select -->
+    <div id="level-screen" class="screen hidden">
+        <h1>ДОСТУП РАЗРЕШЕН</h1>
+        <div id="level-grid"></div>
+        <button id="btn-back-menu" style="margin-top: 20px;">НАЗАД</button>
+    </div>
+
+    <!-- Story Modal -->
+    <div id="story-screen" class="screen hidden">
+        <div id="story-text">...</div>
+        <button id="btn-next-level">ПРОДОЛЖИТЬ</button>
+    </div>
+</div>
+
+<script>
+    // Unlock all levels immediately as requested
+    if (!localStorage.getItem('echo_unlocked') || parseInt(localStorage.getItem('echo_unlocked'), 10) < 10) {
+        localStorage.setItem('echo_unlocked', 10);
+    }
+
+    const TILE_SIZE = 40;
+    const GRAVITY = 0.6;
+    const JUMP_FORCE = -14;
+    const SPEED = 5;
+
+    const STORY_TEXTS = [
+        "СИСТЕМА: Инициализация. Протокол 'Зеркало'. Цель: Ядро.",
+        "СИСТЕМА: Тень учится. Не касайся прошлого.",
+        "АРХИВ: 'Это не тренировка. Это клетка.'",
+        "СИСТЕМА: Обнаружены шипы. Будь осторожен.",
+        "АРХИВ: 'Разорви цикл. Ключ где-то рядом.'",
+        "СИСТЕМА: Ошибка. Субъект отклонился от маршрута.",
+        "НЕИЗВЕСТНЫЙ: Тень хочет занять твое место.",
+        "СИСТЕМА: Вмешательство заблокировано.",
+        "НЕИЗВЕСТНЫЙ: Выход с 10 уровня — это ловушка.",
+        "СИСТЕМА: СБОЙ. Добро пожаловать в реальность."
+    ];
+
+    // UPDATED LEVEL MAPS
+    const LEVEL_MAPS = [
+        // Level 1: The Loop
+        [
+            "#########################",
+            "#D.P....................#",
+            "#######.................#",
+            "#.....#######...........#",
+            "#.......................#",
+            "#.....###...#######.....#",
+            "#.....#...........#.....#",
+            "#.....#..........K#.....#",
+            "#########################"
+        ],
+        // Level 2: The Climb
+        [
+            "#########################",
+            "#D..#.........#........K#",
+            "###.#.........#...#######",
+            "#...#.........#.........#",
+            "#..########.#######.....#",
+            "#.......................#",
+            "#P......................#",
+            "#########################",
+            "#########################"
+        ],
+        // Level 3: Spike Floor (UPDATED)
+        [
+            "#########################",
+            "#P......................#",
+            "#####................D###",
+            "#................########",
+            "#.........#...#.........#",
+            "#.........# K #.........#",
+            "#.SSSS....#####....SSSS.#",
+            "#########################",
+            "#########################"
+        ],
+        // Level 4: The U-Turn (UPDATED GAP)
+        [
+            "#########################",
+            "#D......................#",
+            "########....#############",
+            "#.......#...#...........#",
+            "#.......#..##...#####...#",
+            "#.......#...#.......#...#",
+            "#P..............#...#..K#",
+            "#########################",
+            "#########################"
+        ],
+        // Level 5: Cage Break
+        [
+            "#########################",
+            "#D.....................K#",
+            "#######...........#######",
+            "#.....#...........#.....#",
+            "#.....#####...#####.....#",
+            "#.......................#",
+            "#.........#####.........#",
+            "#P......................#",
+            "#########################"
+        ],
+        // Level 6: Zig Zag (UNCHANGED)
+        [
+            "#########################",
+            "#K..........#..........D#",
+            "######..#####..##########",
+            "#.......................#",
+            "#..###################..#",
+            "#.......................#",
+            "##########..#####..######",
+            "#P......................#",
+            "#########################"
+        ],
+        // Level 7: Risk (UPDATED)
+        [
+            "#########################",
+            "#K.....................D#",
+            "###..################.###",
+            "#...#...............#...#",
+            "#.......#########...##..#",
+            "#.......#.......#.......#",
+            "#P......#.......#.......#",
+            "#########.......#SS#####",
+            "#########################"
+        ],
+        // Level 8: Tight
+        [
+            "#########################",
+            "#P............K.........#",
+            "###.###################.#",
+            "#.......................#",
+            "#.###################.###",
+            "#.....................#.#",
+            "########.##############.#",
+            "#......................D#",
+            "#########################"
+        ],
+        // Level 9: Tower (UNCHANGED)
+        [
+            "#########################",
+            "#K.....................D#",
+            "#####.#####.#####.#####.#",
+            "#.....#.....#.....#.....#",
+            "#.#####.#####.#####.#####",
+            "#.......................#",
+            "#####.#####.#####.#####.#",
+            "#P......................#",
+            "#########################"
+        ],
+        // Level 10: Final (UPDATED)
+        [
+            "#########################",
+            "#D..#..................K#",
+            "###.#.##.####.#.#########",
+            "#...#.#.....#.#.........#",
+            "#..##.#.###.#.########..#",
+            "#.....#...#.........#...#",
+            "#.#########.#####.SSS.#.#",
+            "#P..........#...........#",
+            "#########################"
+        ]
+    ];
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    class Game {
+        constructor() {
+            this.levelIndex = 0;
+            this.tiles = [];
+            this.player = { x: 0, y: 0, vx: 0, vy: 0, w: 20, h: 30, onGround: false, dead: false };
+            this.keys = {};
+            this.hasKey = false;
+            this.doorOpen = false;
+            this.running = false;
+            this.animationId = null; // for requestAnimationFrame management
+
+            // Shadow System
+            this.history = [];
+            this.frameCount = 0;
+
+            // Input (added once)
+            window.addEventListener('keydown', e => this.keys[e.code] = true);
+            window.addEventListener('keyup', e => this.keys[e.code] = false);
+
+            this.loop = this.loop.bind(this);
+        }
+
+        startLevel(idx) {
+            // Cancel any previous animation loop before restarting
+            if (this.animationId) {
+                cancelAnimationFrame(this.animationId);
+                this.animationId = null;
+            }
+
+            this.levelIndex = idx;
+            document.getElementById('hud-level').innerText = idx + 1;
+            this.loadMap(LEVEL_MAPS[idx]);
+            this.hasKey = false;
+            this.doorOpen = false;
+            this.player.vx = 0;
+            this.player.vy = 0;
+            this.player.dead = false;
+
+            // Reset Shadow
+            this.history = [];
+            this.frameCount = 0;
+
+            this.running = true;
+            ui.hideAllScreens();
+            ui.showExitButton();
+            this.animationId = requestAnimationFrame(this.loop);
+        }
+
+        restartLevel() {
+            this.running = false;
+            this.startLevel(this.levelIndex);
+        }
+
+        stopToMenu() {
+            this.running = false;
+            if (this.animationId) {
+                cancelAnimationFrame(this.animationId);
+                this.animationId = null;
+            }
+            ui.showMenu();
+            ui.hideExitButton();
+        }
+
+        loadMap(mapData) {
+            this.tiles = [];
+            for (let y = 0; y < mapData.length; y++) {
+                const row = mapData[y];
+                for (let x = 0; x < row.length; x++) {
+                    const char = row[x];
+                    if (char === 'P') {
+                        this.player.x = x * TILE_SIZE + (TILE_SIZE - this.player.w) / 2;
+                        this.player.y = y * TILE_SIZE + (TILE_SIZE - this.player.h);
+                    } else if (char !== '.') {
+                        this.tiles.push({ x, y, type: char });
+                    }
+                }
+            }
+        }
+
+        update() {
+            if (this.player.dead) {
+                this.restartLevel(); // Restart with proper RAF cancel in startLevel
+                return;
+            }
+
+            // Controls
+            if (this.keys['ArrowLeft'] || this.keys['KeyA']) this.player.vx = -SPEED;
+            else if (this.keys['ArrowRight'] || this.keys['KeyD']) this.player.vx = SPEED;
+            else this.player.vx = 0;
+
+            if ((this.keys['ArrowUp'] || this.keys['KeyW']) && this.player.onGround) {
+                this.player.vy = JUMP_FORCE;
+                this.player.onGround = false;
+            }
+
+            // Physics
+            this.player.vy += GRAVITY;
+            this.player.x += this.player.vx;
+            this.handleCollision('x');
+            this.player.y += this.player.vy;
+            this.handleCollision('y');
+
+            // Bounds
+            if (this.player.y > canvas.height) this.player.dead = true;
+
+            // Shadow Logic (Record & Replay)
+            if (this.frameCount % 2 === 0) {
+                this.history.push({ x: this.player.x, y: this.player.y });
+            }
+            this.frameCount++;
+
+            // Shadow Spawn (delay)
+            if (this.history.length > 90) {
+                const shadowPos = this.history[this.history.length - 90];
+                if (this.checkRectCollide(this.player, {
+                    x: shadowPos.x,
+                    y: shadowPos.y,
+                    w: this.player.w,
+                    h: this.player.h
+                })) {
+                    this.player.dead = true;
+                }
+            }
+        }
+
+        handleCollision(axis) {
+            this.player.onGround = false;
+            const p = this.player;
+
+            for (const t of this.tiles) {
+                const tx = t.x * TILE_SIZE;
+                const ty = t.y * TILE_SIZE;
+
+                if (
+                    p.x < tx + TILE_SIZE && p.x + p.w > tx &&
+                    p.y < ty + TILE_SIZE && p.y + p.h > ty
+                ) {
+                    if (t.type === '#') {
+                        if (axis === 'x') {
+                            if (p.vx > 0) p.x = tx - p.w;
+                            if (p.vx < 0) p.x = tx + TILE_SIZE;
+                            p.vx = 0;
+                        } else {
+                            if (p.vy > 0) { p.y = ty - p.h; p.onGround = true; p.vy = 0; }
+                            if (p.vy < 0) { p.y = ty + TILE_SIZE; p.vy = 0; }
+                        }
+                    } else if (t.type === 'S') {
+                        this.player.dead = true;
+                    } else if (t.type === 'K') {
+                        this.hasKey = true;
+                        this.doorOpen = true;
+                        t.type = '.';
+                    } else if (t.type === 'D') {
+                        if (this.doorOpen) {
+                            this.winLevel();
+                            return;
+                        } else {
+                            if (axis === 'x') {
+                                if (p.vx > 0) p.x = tx - p.w;
+                                if (p.vx < 0) p.x = tx + TILE_SIZE;
+                                p.vx = 0;
+                            } else {
+                                if (p.vy > 0) { p.y = ty - p.h; p.onGround = true; p.vy = 0; }
+                                if (p.vy < 0) { p.y = ty + TILE_SIZE; p.vy = 0; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        checkRectCollide(r1, r2) {
+            return r1.x < r2.x + r2.w && r1.x + r1.w > r2.x &&
+                r1.y < r2.y + r2.h && r1.y + r1.h > r2.y;
+        }
+
+        winLevel() {
+            this.running = false;
+            ui.showStory(this.levelIndex);
+            ui.hideExitButton();
+        }
+
+        nextLevel() {
+            const next = this.levelIndex + 1;
+            if (next >= LEVEL_MAPS.length) {
+                ui.showMenu();
+                ui.hideExitButton();
+            } else {
+                this.startLevel(next);
+            }
+        }
+
+        draw() {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Tiles
+            for (const t of this.tiles) {
+                if (t.type === '.') continue;
+                const x = t.x * TILE_SIZE;
+                const y = t.y * TILE_SIZE;
+
+                if (t.type === '#') {
+                    ctx.strokeStyle = '#0ff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+                    ctx.fillStyle = '#001111';
+                    ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                } else if (t.type === 'S') {
+                    ctx.fillStyle = '#f00';
+                    ctx.beginPath();
+                    ctx.moveTo(x, y + TILE_SIZE);
+                    ctx.lineTo(x + TILE_SIZE / 2, y);
+                    ctx.lineTo(x + TILE_SIZE, y + TILE_SIZE);
+                    ctx.fill();
+                } else if (t.type === 'K') {
+                    if (this.hasKey) continue;
+                    ctx.fillStyle = '#ff0';
+                    ctx.beginPath();
+                    ctx.arc(x + TILE_SIZE / 2, y + TILE_SIZE / 2, 10, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (t.type === 'D') {
+                    ctx.lineWidth = 4;
+                    if (this.doorOpen) {
+                        ctx.strokeStyle = '#0f0';
+                        ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+                        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+                    } else {
+                        ctx.strokeStyle = '#f00';
+                        ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                        ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE);
+                        ctx.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+                        ctx.fillStyle = '#f00';
+                        ctx.fillRect(x + 15, y + 15, 10, 10);
+                    }
+                }
+            }
+
+            // Shadow (Echo)
+            if (this.history.length > 90) {
+                const s = this.history[this.history.length - 90];
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                ctx.fillRect(s.x, s.y, this.player.w, this.player.h);
+                ctx.strokeStyle = '#f00';
+                ctx.strokeRect(s.x, s.y, this.player.w, this.player.h);
+            }
+
+            // Player
+            ctx.fillStyle = '#0ff';
+            ctx.fillRect(this.player.x, this.player.y, this.player.w, this.player.h);
+        }
+
+        loop() {
+            if (!this.running) return;
+            this.update();
+            this.draw();
+            this.animationId = requestAnimationFrame(this.loop);
+        }
+    }
+
+    const game = new Game();
+
+    const ui = {
+        showMenu: () => {
+            document.getElementById('menu-screen').classList.remove('hidden');
+            document.getElementById('level-screen').classList.add('hidden');
+            document.getElementById('story-screen').classList.add('hidden');
+        },
+        showLevelSelect: () => {
+            document.getElementById('menu-screen').classList.add('hidden');
+            const grid = document.getElementById('level-grid');
+            grid.innerHTML = '';
+            for (let i = 0; i < 10; i++) {
+                const btn = document.createElement('button');
+                btn.className = 'level-btn';
+                btn.innerText = (i + 1).toString();
+                btn.onclick = () => game.startLevel(i);
+                grid.appendChild(btn);
+            }
+            document.getElementById('level-screen').classList.remove('hidden');
+        },
+        showStory: (lvlIdx) => {
+            const txt = STORY_TEXTS[lvlIdx] || "Уровень завершен";
+            document.getElementById('story-text').innerText = txt;
+            document.getElementById('story-screen').classList.remove('hidden');
+        },
+        hideAllScreens: () => {
+            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+        },
+        showExitButton: () => {
+            document.getElementById('btn-exit').classList.remove('hidden');
+        },
+        hideExitButton: () => {
+            document.getElementById('btn-exit').classList.add('hidden');
+        }
+    };
+
+    // Button wiring (added once)
+    document.getElementById('btn-new-game').addEventListener('click', () => game.startLevel(0));
+    document.getElementById('btn-level-select').addEventListener('click', () => {
+        ui.showLevelSelect();
+        ui.hideExitButton();
+    });
+    document.getElementById('btn-back-menu').addEventListener('click', () => {
+        ui.showMenu();
+        ui.hideExitButton();
+    });
+    document.getElementById('btn-next-level').addEventListener('click', () => game.nextLevel());
+    document.getElementById('btn-exit').addEventListener('click', () => game.stopToMenu());
+
+    // Init: start at menu, hide story and exit overlay initially
+    ui.showMenu();
+    ui.hideExitButton();
+</script>
+</body>
+</html>

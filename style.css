@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background-color: #050505;
+    color: #0ff;
+    font-family: 'Orbitron', sans-serif;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+
+/* Fit nicely in a mobile iframe, one-screen view */
+#game-container {
+    position: relative;
+    border: 2px solid #0ff;
+    box-shadow: 0 0 20px #0ff;
+    width: min(100vw - 20px, 1000px);
+    aspect-ratio: 25 / 9; /* matches 1000x360 */
+    background: #111;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* UI Overlays */
+.screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+}
+
+.hidden {
+    display: none !important;
+}
+
+h1 {
+    font-size: 32px;
+    text-shadow: 0 0 10px #0ff;
+    margin-bottom: 20px;
+    letter-spacing: 4px;
+    text-align: center;
+}
+
+button {
+    background: transparent;
+    border: 2px solid #0ff;
+    color: #0ff;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-family: 'Orbitron', sans-serif;
+    margin: 8px;
+    cursor: pointer;
+    transition: 0.2s;
+    text-transform: uppercase;
+    min-width: 160px;
+}
+
+button:hover {
+    background: #0ff;
+    color: #000;
+    box-shadow: 0 0 15px #0ff;
+}
+
+/* Level Grid */
+#level-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    max-width: 260px;
+}
+
+.level-btn {
+    min-width: 0;
+    padding: 8px;
+}
+
+/* Story Modal */
+#story-screen {
+    background: rgba(0, 20, 20, 0.95);
+    border-top: 4px solid #f00;
+    border-bottom: 4px solid #f00;
+}
+
+#story-text {
+    font-size: 18px;
+    color: #f55;
+    text-align: center;
+    max-width: 80%;
+    line-height: 1.4;
+    margin-bottom: 24px;
+    text-shadow: 0 0 5px #f00;
+}
+
+#hud {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.red-text {
+    color: #f00;
+    text-shadow: 0 0 10px #f00;
+}
